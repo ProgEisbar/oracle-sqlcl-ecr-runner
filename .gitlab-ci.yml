@@ -1,0 +1,33 @@
+stages:
+  - build
+
+variables:
+  DOCKER_HOST: tcp://docker:2375
+  DOCKER_TLS_CERTDIR: ""
+  IMAGE_TAG: "$CI_COMMIT_SHORT_SHA"
+
+build_sqlcl_image:
+  stage: build
+  image: docker:27-cli
+  services:
+    - name: docker:27-dind
+  tags:
+    - "$RUNNER_TAG"
+  before_script:
+    - apk add --no-cache aws-cli
+    - test -n "$AWS_ACCOUNT_ID"
+    - test -n "$AWS_REGION"
+    - test -n "$ECR_REPOSITORY"
+    - test -n "$RUNNER_TAG"
+  script:
+    - export ECR_REGISTRY="${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com"
+    - export IMAGE_URI="${ECR_REGISTRY}/${ECR_REPOSITORY}:${IMAGE_TAG}"
+    - aws sts get-caller-identity > /dev/null
+    - aws ecr describe-repositories --repository-names "$ECR_REPOSITORY" --region "$AWS_REGION" > /dev/null
+    - aws ecr get-login-password --region "$AWS_REGION" | docker login --username AWS --password-stdin "$ECR_REGISTRY"
+    - docker build --pull --tag "$ECR_REPOSITORY:$IMAGE_TAG" .
+    - docker tag "$ECR_REPOSITORY:$IMAGE_TAG" "$IMAGE_URI"
+    - docker push "$IMAGE_URI"
+  rules:
+    - if: '$CI_COMMIT_BRANCH == "main"'
+
